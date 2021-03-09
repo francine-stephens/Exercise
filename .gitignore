@@ -37,3 +37,10 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+## Extra files
+/*.gpx
+api.key.csv
+Strava/export_8.4.20/
+Strava/runs_gpx/
+
