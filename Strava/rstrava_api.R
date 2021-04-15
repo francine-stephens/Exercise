@@ -3,20 +3,26 @@
 # A test run of the API. Treat as template/reference for rStrava package.
 # AUTHOR: Francine Stephens
 # DATE CREATED:  3/7/21
-# LAST UPDATED DATE: 3/8/21
+# LAST UPDATED DATE: 4/14/21
 #-------------------------------------------------------------------------------
 
 ## INITIALIZE-------------------------------------------------------------------
 
+#devtools::install_github('fawda123/rStrava')
 packages <- c(
-  tidyverse,
-  rStrava,
-  sp,
-  ggmap,
-  raster,
-  mapproj,
-  lubridate,
-  leaflet
+  "tidyverse",
+  "rStrava",
+  "sp",
+  "ggmap",
+  "raster",
+  "mapproj",
+  "lubridate",
+  "leaflet", 
+  "rStrava",
+  "extrafont",
+  "hrbrthemes",
+  "wesanderson",
+  "ggtext"
 )
 lapply(packages, library, character.only = T)
 
@@ -28,8 +34,18 @@ mykey <- 'XXXXXXXXXXXXXXXXXXXXXXXXXX'  # Google API key
 register_google(mykey)
 
 ## CONFIG
-stoken <- httr::config(token = strava_oauth(app_name, app_client_id, app_secret, app_scope="activity:read_all"
-                                            ))
+stoken <- httr::config(
+  token = strava_oauth(
+    app_name,
+    app_client_id,
+    app_secret,
+    app_scope="activity:read_all",
+    cache=TRUE)
+  )
+
+#### FOR NEXT TIME
+# stoken <- httr::config(token = readRDS('.httr-oauth')[[1]])
+
 
 ## EXTRACT DATA-----------------------------------------------------------------
 # download strava data
@@ -45,7 +61,7 @@ length(routes)  # GET # of activities
 activities_data <- compile_activities(routes, units = "imperial") 
     # act_data <- compile_activities(routes, acts = 1:20, units = "imperial") %>% 
     #   filter(distance > 2 & total_elevation_gain > 0) 
-saveRDS(activities_data, file = "strava_activities_030821.rds")
+saveRDS(activities_data, file = "strava_activities_041421.rds")
 
 
 ## MANIPULATE ACTIVITIES DATA---------------------------------------------------
@@ -56,7 +72,7 @@ activities_data <- activities_data %>%
          year = year(start_date),
          day_of_year = yday(start_date),
          month = month(start_date),
-         day = wday(start_date, label = T),
+         day = wday(start_date, label = TRUE),
          week = week(start_date))
 
 activities_data %>%
@@ -158,14 +174,35 @@ qoms_df %>%
   theme(legend.position = "bottom")  
   
 
+## GRAB RUNS FOR PLOTTING
+runs <- activities_data %>% 
+  filter(
+    type == "Run" & !is.na(start_latitude)
+         ) 
+run_ids <- runs %>% 
+  slice(1:39) %>%
+  pull(id)
+
+run_dates <- runs %>%
+  dplyr::select(id, start_date) %>%
+  mutate(date = as.Date(str_sub(start_date, end = 10))
+         )
+
+
+run_streams_first <- get_activity_streams(act_data=routes, 
+                                   stoken, 
+                                   id=run_ids, 
+                                   types="latlng", 
+                                   units="imperial")
+run_streams_recent <- get_activity_streams(act_data=routes, 
+                                           stoken, 
+                                           id=run_ids, 
+                                           types="latlng", 
+                                           units="imperial")
+
 
 # HEAT MAPPING
-# all routes
-activities_for_heat_mapping <- activities_data %>% 
-  filter(start_longitude > -98.35) %>% 
-  filter(start_latitude > 29.6) 
-
-get_heat_map(activities_for_heat_mapping, key = mykey, col = 'darkgreen', size = 2, distlab = F, f = 0.4)
+get_heat_map(runs, key = mykey, col = 'darkgreen', size = 2, distlab = F, f = 0.4)
 
 # activity id
 id <- 4443408220
@@ -198,4 +235,4 @@ get_heat_map(activities_for_heat_mapping,
 
 
 # GET ELEVATION PROFILES
-get_elev_prof(activities_for_heat_mapping, id = id, key = mykey, units = 'imperial')
+get_elev_prof(runs, id = id, key = mykey, units = 'imperial')
