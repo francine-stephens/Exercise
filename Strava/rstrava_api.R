@@ -34,9 +34,9 @@ packages <- c(
 lapply(packages, library, character.only = T)
 
 ## KEY PARAMETERS
-app_name <- 'Francine Stephens' # chosen by user
-app_client_id  <- '52066' # an integer, assigned by Strava
-app_secret <- '3aa504f5d38e6337aa2f4d8b62669203a790bee2' # an alphanumeric secret, assigned by Strava
+app_name <- '###' # chosen by user
+app_client_id  <- '#####' # an integer, assigned by Strava
+app_secret <- '#########################' # an alphanumeric secret, assigned by Strava
 
 ## CONFIG
 stoken <- httr::config(
@@ -54,7 +54,7 @@ stoken <- httr::config(token = readRDS('.httr-oauth')[[1]])
 
 ## EXTRACT DATA-----------------------------------------------------------------
 # download strava data
-myinfo <- get_athlete(stoken, id = '37259397')
+myinfo <- get_athlete(stoken, id = '#####')
 
 routes <- get_activity_list(stoken)
 length(routes)  # GET # of activities

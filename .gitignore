@@ -46,3 +46,4 @@ Strava/runs_gpx/
 Strava/rides_gpx/
 *.zip
 Strava/Parcels/*
+*.txt
