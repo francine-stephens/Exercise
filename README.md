@@ -1,6 +1,9 @@
 # Exercise
 The repo contains code where I extract, process, and visualize my fitness and workout data. I'm interested in seeing my accomplishments and tracking my progress. 
 
+**Runs around Burlingame & San Mateo:**
+![burmateo_parcels](https://github.com/francine-stephens/Exercise/blob/main/Strava/burmateo_parcels.jpeg)
+
 
 **Here are my outdoor runs plotted as multiples:** 
 ![runs_041421_moonrise](https://user-images.githubusercontent.com/47190395/114804532-0a9a2a80-9d67-11eb-94d4-4a38080733bb.png)
