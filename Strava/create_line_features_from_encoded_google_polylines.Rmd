@@ -1,0 +1,178 @@
+---
+title: "Create and Export Route Line Objects"
+author: "Francine Stephens"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+packages <- c(
+  "tidyverse",
+  "ggplot2",
+  "rStrava",
+  "sp",
+  "sf",
+  "mapproj",
+  "lubridate",
+  "maptools",
+  "leaflet",
+  "tmap",
+  "mapboxapi",
+  "tigris",
+  "extrafont", 
+  "ggtext",
+  "htmltools"
+)
+lapply(packages, library, character.only = T)
+
+## PARAMETERS
+albers_ea <- 5070
+wgs <- 4326
+ca_place_names <- c("Stanford", "Palo Alto")
+state_fips <- c("06")
+ca_counties <- c("Santa Clara")
+
+## DATA
+ca_places <- places(state = state_fips)
+ca_county <- counties(state = state_fips)
+```
+
+## Functions
+```{r}
+points_to_line <- function(data, long, lat, id_field = NULL, sort_field = NULL) {
+  
+  # Convert to SpatialPointsDataFrame
+  coordinates(data) <- c(long, lat)
+  
+  # If there is a sort field...
+  if (!is.null(sort_field)) {
+    if (!is.null(id_field)) {
+      data <- data[order(data[[id_field]], data[[sort_field]]), ]
+    } else {
+      data <- data[order(data[[sort_field]]), ]
+    }
+  }
+  
+  # If there is only one path...
+  if (is.null(id_field)) {
+    
+    lines <- SpatialLines(list(Lines(list(Line(data)), "id")))
+    
+    return(lines)
+    
+    # Now, if we have multiple lines...
+  } else if (!is.null(id_field)) {  
+    
+    # Split into a list by ID field
+    paths <- sp::split(data, data[[id_field]])
+    
+    sp_lines <- SpatialLines(list(Lines(list(Line(paths[[1]])), "line1")))
+    
+    # Loop over paths
+    for (p in 2:length(paths)) {
+      id <- paste0("line", as.character(p))
+      l <- SpatialLines(list(Lines(list(Line(paths[[p]])), id)))
+      sp_lines <- spRbind(sp_lines, l)
+    }
+    
+    return(sp_lines)
+  }
+}
+
+```
+
+
+## Extract Census Geography AOIs
+```{r}
+place_aoi <- ca_places %>% 
+  filter(NAME %in% ca_place_names) %>% 
+  st_transform(., crs = albers_ea)
+
+county_aoi <- ca_county %>% 
+  filter(NAME %in% ca_counties) %>% 
+  st_transform(., crs = albers_ea)
+
+```
+
+
+## Decode Google Polylines & Convert to Line Features
+
+```{r}
+### DECODING
+activities_summary_polyline <- activities_data %>% 
+  filter(!is.na(map.summary_polyline), !is.na(end_latlng1)) %>% 
+  rownames_to_column(var = "id_p")
+  
+
+decoded_polyline <- googlePolylines::decode(
+  activities_summary_polyline$map.summary_polyline)
+
+## CONVERT DECODED TO LINE GEOMETRY
+unlist_polyline <- map_df(decoded_polyline, 
+                          ~as.data.frame(.x), 
+                          .id="id")
+
+full_polyline_df <- unlist_polyline %>% 
+  st_as_sf(., coords = c("lon", "lat"), crs = wgs) %>% 
+  st_transform(., crs = st_crs(albers_ea)) %>%
+  left_join(., activities_summary_polyline, 
+            by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  as.data.frame()
+
+lines <- points_to_line(data = full_polyline_df, 
+                          long = "lon", 
+                          lat = "lat", 
+                          id_field = "id")
+```
+
+## Subset Route Lines to AOI
+```{r}
+lines_sf <- as(lines,
+   "sf")
+
+st_crs(lines_sf) <- albers_ea
+
+lines_sf_aoi <- st_intersection(lines_sf %>% 
+            st_transform(., albers_ea) %>% 
+              cbind(., activities_summary_polyline), 
+          county_aoi) %>% 
+  filter(id != "7787917120")
+
+```
+
+
+
+
+# View Routes & Export
+
+```{r}
+stanford_color_pal <-  c("#014240", "#2D716F", "#175E54")
+stanford_campus_caption <- '<span style="color:white;">Stanford, </span>'
+
+
+tm_shape(lines_sf_aoi) + 
+  tm_lines(col = "sport_type",
+           palette = stanford_color_pal) + 
+  tm_shape(place_aoi) + 
+  tm_borders(col = "black")
+
+styleid <- "cljofh9aw00qi01pdd06k6i4t"
+
+leaflet() %>%
+  addMapboxTiles(username = "francinestephens",
+                 style_id = styleid
+                 ) %>% 
+  addPolylines(data = lines_sf_aoi %>% 
+          st_transform(wgs), 
+          label = ~htmlEscape(id))
+
+st_write(lines_sf_aoi,
+         paste0(wd, output_folder, "/stanford_routes_lines.shp"))
+st_crs(routes_aoi)
+
+```

@@ -1,0 +1,290 @@
+---
+title: "Create graphic of walks, runs, bikes"
+author: "Francine Stephens"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+packages <- c(
+  "tidyverse",
+  "ggplot2",
+  "rStrava",
+  "sp",
+  "sf",
+  "mapproj",
+  "lubridate",
+  "maptools",
+  "tmap",
+  "mapboxapi",
+  "tigris",
+  "extrafont", 
+  "ggtext"
+)
+lapply(packages, library, character.only = T)
+
+
+wd <- getwd()
+output_folder <- "/activities_downloads_repo"
+
+activities_data <- readRDS(paste0(wd, output_folder, 
+                                  "/strava_activities_070423.rds"))
+```
+
+
+
+```{r}
+
+### EXTRACT POLYLINES
+activities_summary_polyline <- activities_data %>% 
+  filter(!is.na(map.summary_polyline), !is.na(end_latlng1)) 
+  
+
+decoded_polyline <- googlePolylines::decode(
+  activities_summary_polyline$map.summary_polyline)
+
+
+## EXTRACT POLYLINE POINTS
+## POLYLINE ID POINTS
+activities_summary_polyline_id <- activities_summary_polyline %>% 
+  rownames_to_column(var = "id_p")
+
+unlist_polyline <- map_df(decoded_polyline, ~as.data.frame(.x), .id="id")
+
+full_polyline_df <- unlist_polyline %>% 
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(., crs = st_crs(5070)) %>%
+  left_join(., activities_summary_polyline_id, by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  as.data.frame()
+
+```
+
+```{r}
+full_polyline_df %>% 
+  distinct(id)
+```
+
+```{r}
+# load fonts - every session
+loadfonts(device = "win", quiet = TRUE)
+library(extrafont)
+library(showtext)
+sysfonts::font_add_google("Urbanist")
+sysfonts::font_add_google("Play")
+sysfonts::font_add_google("Chakra Petch")
+
+sysfonts::font_families()
+myFont <- "Gabriola"
+
+
+theme_runs <- theme_void(base_family = "Chakra Petch",
+                         base_size = 20) +
+  theme(
+        plot.background = element_rect(fill = "black"),
+        panel.background = element_rect(fill = "black"),
+        strip.background = element_blank(),
+        panel.border = element_rect(colour = NA, fill = NA),
+        plot.caption = element_markdown(hjust=0, size=rel(2.2), face = "bold"),
+        panel.spacing = unit(0, "lines"),
+        strip.text = element_blank(),
+        #plot.margin = unit(rep(1, 4), "cm"),
+        plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5, vjust = 2.5)
+  )
+color_pal <-  c("tomato", "yellow2", "darkorange1")
+
+#  c("#E07A5F", "#3D405B", "#81B29A", "#F2CC8F")
+
+# TEXT
+mycaption <- '<span style="color:tomato;">Rides, </span><span style="color:yellow2;">Runs, </span><span style="color:darkorange1;">Walks. </span> <span style="color:white;"> 1,354 Outdoor Activities from 2019 to 2023 in 10 cities.</span>'
+
+
+
+## PLOT
+showtext_auto()
+ggplot(full_polyline_df %>% 
+         filter(sport_type != "Hike")
+  ) +
+  geom_path(aes(lon, lat, group = id, color = sport_type), size = 0.55, lineend = "round") +
+  facet_wrap(~id, scales = 'free', ncol =52) + 
+  labs(
+       caption = mycaption
+       ) + 
+  theme_runs + 
+  scale_color_manual(values = color_pal)
+ggsave("routes_CP3.jpg", width = 11, height = 8.5)
+
+```
+
+
+
+## Burmateo
+```{r}
+burmateo_routes <- unlist_polyline %>% 
+  filter(lon >=-122.37 & lon <= -122.0) %>%
+  filter(lat >= 37.55 & lat <= 37.65) %>%
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(., crs = st_crs(5070)) %>%
+  left_join(., activities_summary_polyline_id, by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  as.data.frame()  %>% 
+  filter(sport_type != "Hike") 
+
+
+
+burmateo_routes %>% 
+  distinct(id, .keep_all = TRUE) %>% 
+  group_by(sport_type) %>% 
+  count() %>%
+  ungroup()
+
+# TEXT
+burmateo_caption <- '<span style="color:tomato;">106 Rides, </span><span style="color:yellow2;">135 Runs, </span><span style="color:darkorange1;">544 Walks</span> <span style="color:white;">in Bur-Mateo Neighborhood from August 2021 to June 2023.</span>'
+
+showtext_auto()
+ggplot(burmateo_routes) +
+  geom_path(aes(lon, lat, group = id, color = sport_type), size = 0.55, lineend = "round") +
+  facet_wrap(~id, scales = 'free') + 
+  labs(
+       caption = burmateo_caption
+       ) + 
+  theme_runs + 
+  scale_color_manual(values = color_pal)
+ggsave("routes_burmateo.jpg", width = 11, height = 8.5)
+
+```
+
+## NBTX 
+```{r}
+nbtx_routes <- unlist_polyline %>% 
+  filter(lon >=-98.806552 & lon <= -97.999271) %>%
+  filter(lat >= 29.114435 & lat <= 30.037994) %>%
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326) %>% 
+  st_transform(., crs = st_crs(5070)) %>%
+  left_join(., activities_summary_polyline_id, by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  as.data.frame()  %>% 
+  filter(sport_type != "Hike")
+
+#-98.806552	29.114435	-98.116902	29.760713
+# -98.646244 29.594473
+
+nbtx_routes %>% 
+  distinct(id, .keep_all = TRUE) %>% 
+  group_by(sport_type) %>% 
+  count() %>%
+  ungroup()
+
+# TEXT
+nbtx_caption <- '<span style="color:tomato;">45 Rides, </span><span style="color:yellow2;">25 Runs, </span><span style="color:darkorange1;">183 Walks</span> <span style="color:white;">in the San Antonio Metro from 2019 to June 2023.</span>'
+
+showtext_auto()
+ggplot(nbtx_routes) +
+  geom_path(aes(lon, lat, group = id, color = sport_type), size = 0.55, lineend = "round") +
+  facet_wrap(~id, scales = 'free') + 
+  labs(
+       caption = nbtx_caption
+       ) + 
+  theme_runs + 
+  scale_color_manual(values = color_pal)
+ggsave("routes_nbtx.jpg", width = 11, height = 8.5)
+
+```
+
+## Stanford
+```{r}
+stanford_routes <- unlist_polyline %>% 
+  filter(lon >=-122.202653 & lon <= -121.208178) %>%
+  filter(lat >= 36.892976 & lat <= 37.484637) %>%
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326) %>% 
+  #st_transform(., crs = st_crs(5070)) %>%
+  left_join(., activities_summary_polyline_id, by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2]) %>% 
+  as.data.frame()  %>% 
+  filter(sport_type != "Hike")
+
+stanford_routes %>% 
+  distinct(id, .keep_all = TRUE) %>% 
+  group_by(sport_type) %>% 
+  count() %>%
+  ungroup()
+
+# TEXT
+stanford_caption <- '<span style="color:tomato;">52 Rides, </span><span style="color:yellow2;">61 Runs, </span><span style="color:darkorange1;">139 Walks</span> <span style="color:white;">@ Stanford from 2019 to June 2023.</span>'
+
+showtext_auto()
+ggplot(stanford_routes) +
+  geom_path(aes(lon, lat, group = id, color = sport_type), size = 0.55, lineend = "round") +
+  facet_wrap(~id, scales = 'free') + 
+  labs(
+       caption = stanford_caption
+       ) + 
+  theme_runs + 
+  scale_color_manual(values = color_pal)
+ggsave("routes_stanford.jpg", width = 11, height = 8.5)
+
+stanford_color_pal <-  c("#014240", "#2D716F", "#175E54")
+stanford_campus_caption <- '<span style="color:white;">Stanford, </span>'
+
+stanford_only_routes <- unlist_polyline %>% 
+  filter(lon >=-122.202653 & lon <= -121.208178) %>%
+  filter(lat >= 36.892976 & lat <= 37.484637) %>% 
+  filter(lon < -122.13 & lat <37.45) %>%
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326) %>% 
+  #st_transform(., crs = st_crs(5070)) %>%
+  left_join(., activities_summary_polyline_id, by = c("id" = "id_p")) %>% 
+  # 2 Extract coordinates
+  mutate(lon = sf::st_coordinates(.)[,1],
+                lat = sf::st_coordinates(.)[,2])
+
+st_write(stanford_only_routes,
+         paste0(wd, output_folder, "/stanford_routes.shp"))
+
+
+ggplot(stanford_only_routes) +
+  geom_path(aes(lon, lat, group = id, color = sport_type), 
+            size = 0.55, 
+            lineend = "round",
+            #color = "#8C1515", 
+            alpha = 0.5) + 
+  scale_color_manual(values = stanford_color_pal) +
+    labs(
+       caption = ""
+       ) + 
+    theme_runs
+
+
+mapbox <- "sk.eyJ1IjoiZnJhbmNpbmVzdGVwaGVucyIsImEiOiJja2ljb3VrczMwdDdhMnhsNjA4Yjh1c2h1In0.WJjq6TysT6zZZnaxsN0s5g"
+styleid <- "cljofh9aw00qi01pdd06k6i4t"
+
+basemap_stanford <- mapboxapi::get_static_tiles(
+  location = stanford_only_routes,
+  zoom = 15,
+  style_id = styleid,
+  username = "francinestephens"
+)
+
+
+tm_shape(basemap_stanford) + 
+  tm_rgb() + 
+  tm_shape(stanford_only_routes) + 
+  tm_dots(col = "sport_type", 
+          size = 0.1,
+          alpha = 0.5,
+           palette = stanford_color_pal,
+          legend.show = TRUE) + 
+  tm_layout(legend.outside = TRUE,
+            legend.outside.position = "right")
+```
