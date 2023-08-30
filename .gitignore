@@ -51,3 +51,5 @@ Strava/Parcels/*
 *.prj
 *.shp
 *.shx
+DI_CONNECT/*
+DI_CONNECT_IQ/*

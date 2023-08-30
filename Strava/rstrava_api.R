@@ -41,7 +41,7 @@ stoken <- httr::config(
     cache=TRUE)
   )
 
-
+basic <- get_basic('https://strava.com/api/v3/athlete', id= '49426765')
 ## EXTRACT DATA-----------------------------------------------------------------
 # download strava data
 myinfo <- get_athlete(stoken, id = '#####')
@@ -56,9 +56,11 @@ length(routes)  # GET # of activities
 activities_data <- compile_activities(routes, units = "imperial") 
     # act_data <- compile_activities(routes, acts = 1:20, units = "imperial") %>% 
     #   filter(distance > 2 & total_elevation_gain > 0) 
-saveRDS(activities_data, file = "strava_activities_070423.rds")
 
+str(activities_data)
 summary(activities_data)
+
+saveRDS(activities_data, file = "strava_activities_082923.rds")
 
 
 ## MANIPULATE ACTIVITIES DATA---------------------------------------------------
