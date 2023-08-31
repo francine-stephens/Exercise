@@ -1,0 +1,417 @@
+---
+title: "Create Dashboard Viz"
+author: "Francine Stephens"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## INITIALIZE-------------------------------------------------------------------
+
+#devtools::install_github('fawda123/rStrava')
+packages <- c(
+  "tidyverse",
+  "rStrava",
+  "sp",
+  "ggmap",
+  "raster",
+  "mapproj",
+  "lubridate",
+  "leaflet", 
+  "extrafont",
+  "hrbrthemes",
+  "wesanderson",
+  "ggtext",
+  "gepaf",
+  "maptools",
+  "mapboxapi",
+  "tigris", 
+  "plotly"
+)
+lapply(packages, library, character.only = T)
+
+## PARAMETERS ------------------------------------------------------------------
+wd <- getwd()
+output_folder <- "/activities_downloads_repo"
+viz_folder <- "/viz_outputs/"
+
+# Dates
+current_date <- Sys.Date()
+date_prior_week <- current_date - 7
+two_weeks_prior <- current_date - 14
+current_week <- week(current_date)
+current_month <- month(current_date)
+current_year <- year(current_date)
+
+
+# Activities
+activity_types <- c("Walk", "Run", "Ride")
+activity_time_goal <- 15000
+walk_distance_goal <- 14
+run_distance_goal <- 9
+
+## DATA IMPORT -----------------------------------------------------------------
+activities_data <- readRDS(paste0(wd,
+                                  output_folder, 
+                                  "/strava_activities_083023.rds"))
+
+
+## FUNCTIONS -------------------------------------------------------------------
+subset_by_weeks <- function(x) { 
+  x %>% 
+  filter(start_date >= two_weeks_prior) %>% 
+  mutate(week = ifelse(start_date >= two_weeks_prior & start_date <= date_prior_week, 
+                       "Last Week", "Current Week")) 
+  }
+
+
+
+compute_v_last_metrics <- function(x, goal) { 
+  x %>% 
+  mutate(WoW_Chg = ((`Current Week` - `Last Week`)/`Last Week`),
+         v_Goal = ((`Current Week` - goal)/goal)
+  )
+  }
+
+
+rounding_all_metrics <- function(x) { 
+  x %>% 
+  mutate(across(where(is.numeric), ~round(.x, digits = 1)))
+  }
+
+evaluate_performance_v_goal <- function(x) { 
+  x %>% 
+    mutate(performance = case_when(v_Goal > 0 ~ paste0("Exceeded Goal by ", v_Goal, "%"),
+                                   v_Goal == 0 ~ "Met Goal",
+                                   v_Goal < 0 ~ paste0("Did Not Meet Goal by ", v_Goal, "%"),
+                                   TRUE ~ ""
+                                   ))
+  
+  }
+
+```
+
+# Data Cleaning
+```{r}
+
+activities_data_c <- activities_data %>%
+  mutate(start_date = as_date(start_date),
+         year = year(start_date),
+         day_of_year = yday(start_date),
+         month = month(start_date),
+         day = wday(start_date, label = TRUE),
+         week = week(start_date))
+
+
+# Get weekly averages
+activities_data_c %>% 
+  filter(year >= 2023) %>%
+  group_by(week) %>% 
+  summarize(total_time = sum(elapsed_time, na.rm = TRUE)) %>% 
+  ungroup()
+```
+
+
+# Extract fitness activity minutes
+```{r}
+activities_data_c %>% 
+  subset_by_weeks() %>% 
+  group_by(week) %>%
+  summarize(time = sum(elapsed_time, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "week",
+              values_from = "time") %>% 
+  compute_v_last_metrics(., activity_time_goal) %>% 
+  rounding_all_metrics() %>% 
+  evaluate_performance_v_goal()
+```
+
+## Extract Distance Walked Relative to Last Week
+```{r}
+
+activities_data_c %>% 
+  mutate(
+         type = case_when(str_detect(type, "Walk") ~ "Walk",
+                          str_detect(type, "Run") ~ "Run",
+                          str_detect(type, "Ride") ~ "Ride",
+                          TRUE ~ "Other"
+                          )
+         ) %>%   
+  filter(type %in% activity_types) %>%
+  subset_by_weeks() %>% 
+  group_by(type, week) %>% 
+  summarize(distance = sum(distance, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "week",
+              values_from = "distance") %>% 
+  mutate(
+    goals = ifelse(type == "Run", run_distance_goal, walk_distance_goal),
+    WoW_Chg = ((`Current Week` - `Last Week`)/`Last Week`),
+    v_Goal = ((`Current Week` - goals)/goals)
+    ) %>%
+  rounding_all_metrics() %>% 
+  evaluate_performance_v_goal()
+
+
+```
+
+# Get Activity Breakdown
+```{r}
+activity_log_detailed <- activities_data_c %>% 
+  filter(start_date >= date_prior_week & week == current_week) %>% 
+  group_by(day, start_date, type) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(type = if_else(type == "WeightTraining", "Weight Training", type), 
+         Description = paste0( type, ": ", n)) %>% 
+  group_by(day) %>% 
+  mutate(
+        `Activity Log` = toString(Description)
+        ) %>% 
+  ungroup() %>% 
+  distinct(day, .keep_all = TRUE)
+
+
+# Current Week 
+training_log_data <- activities_data_c %>% 
+  filter(start_date >= date_prior_week & week == current_week) %>% 
+  group_by(day, start_date) %>% 
+  summarize(n_activities = n(),
+            sum_time = sum(elapsed_time, na.rm = TRUE)
+            ) %>% 
+  ungroup() %>% 
+  mutate(sum_time_min = sum_time/60,
+         week = "Week to Date") %>% 
+  rounding_all_metrics() %>% 
+   mutate(sum_time_min = round(sum_time_min, 0)) %>% 
+  left_join(., activity_log_detailed, by = "day")
+
+weekly_training_log_gg <- ggplot() + 
+  # Time
+  geom_point(data = training_log_data,
+             aes(x = day, y = week, size = sum_time_min),
+             color = "#685268",
+             alpha = 0.85) + 
+  scale_size_continuous("Minutes", range = c(20, 40)) + 
+  geom_text(data = training_log_data,
+            aes(x = day, y = week, label = sum_time_min),
+            size = 7,
+            color = "#F5F5F5",
+            show.legend = FALSE, 
+            fontface = "bold") + 
+  # Number of Activities
+  ggnewscale::new_scale('size') +
+  geom_point(data = training_log_data,
+             aes(x = day, y = week, size = n_activities),
+             position = position_nudge(x = 0.19, y = 0.2),
+             fill = "black", color = "black",
+             alpha = 0.5, 
+             ) +   
+  scale_size_continuous("# Activities", range = c(10, 15), breaks = c(0, 1, 2, 3, 4, 5)) + 
+  geom_text(data = training_log_data,
+             aes(x = day, y = week, label = n_activities),
+             position = position_nudge(x = 0.19, y = 0.2),
+             color = "#F5F5F5", size = 5, fontface = "bold") + 
+  # Layout 
+  labs(title = "This Week's Training Log", 
+       x = "",
+       y = ""
+         ) + 
+  scale_x_discrete(drop = FALSE,
+                   position = "top"
+                   ) + 
+  scale_y_discrete(expand = expand_scale(mult = c(5.1, 1))) + 
+  theme_classic() + 
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        panel.grid=element_blank(), 
+        panel.border=element_blank(), 
+        axis.line.x.top = element_line(linewidth = 1.5),
+        axis.text.x.top = element_text(face = "bold", size = 14),
+        axis.title.x.top = element_text(face = "bold", size = 16),
+        # LEGEND
+        legend.position = "top",
+        legend.direction = "horizontal", 
+        legend.text = element_text(face = "bold", size = 10),
+        legend.title = element_text(face = "bold", size = 10),
+        # TITLE
+        plot.title = element_text(face = "bold", size = 22, hjust = 0.5)
+  )
+ggsave(paste0(wd, viz_folder, "Training_log.jpg"), width = 15, height = 7)
+
+# REDO AS A TABLE
+```
+
+```{r}
+# CALENDAR: Each Week per Year
+
+#function to produce calendar
+get_calendar <- function(start_date, end_date) {
+  n_days <- interval(start_date,end_date)/days(1)
+  date<-start_date + days(0:n_days)
+  month_name<-format(date,"%B")
+  month_num<-format(date,"%m")
+  year<-format(date,"%Y")
+  day_num<-format(date,'%d')
+  day<-wday(date, label=TRUE)
+  week_num<-strftime(date, format = "%V")
+  cal<-data.frame(date, year, month_name, month_num, day_num, day, week_num)
+  cal[cal$week_num>=52 & cal$month_num=="01","week_num"]=00
+  
+  week_month<-cal%>% 
+    group_by(year,month_name, week_num)%>%
+    summarise()%>%
+    mutate(week_month_num=row_number())
+  
+  cal<-merge(cal, week_month, by=c("month_name"="month_name","week_num"="week_num","year"="year"))
+  cal$month_name<-factor(cal$month_name, levels=c("January","February","March","April","May","June","July","August","September","October","November","December"))
+  cal$day<-factor(cal$day, levels=c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))
+  
+  return(cal)
+  
+}
+
+
+#create date range
+start_current_year <- as.Date('2023-01-01')
+
+#create calendar
+cal <- get_calendar(start_current_year, current_date)
+
+# Summarize workout by Day
+workout_by_day <- activities_data_c %>%
+  group_by(start_date)%>%
+  summarise(workouts=n(), 
+            workout_min = sum(elapsed_time)/60,
+            class_type = paste(unique(type), collapse=","))%>%
+  rename(date = start_date)%>%
+  mutate(did_workout=1,
+         class_type = ifelse(class_type == "WeightTraining", "Weight Training", class_type),
+         cardio= case_when(grepl("Run|Ride|Workout",class_type)~1,TRUE~0),
+         strength = case_when(grepl("Weight Training",class_type)~1,TRUE~0))%>%
+  mutate(type = case_when(cardio==1 & strength==1~"Cardio & Strength",
+                          cardio==1 & strength==0~"Cardio",
+                          cardio==0 & strength==1~"Strength",
+                          TRUE~"Other"))%>%
+  arrange(date)
+
+
+#create a factor out of class types
+workout_by_day$type<-factor(workout_by_day$type, 
+                            levels=c("Cardio & Strength","Cardio","Strength","Other"))
+
+#merge workout info summary with calendar, left join to preserve all calendar days (all.x=TRUE)
+cal_workout<-merge(cal,workout_by_day, by=c("date"="date"), all.x=TRUE)
+
+#custom color paleette
+pal<-c('#685268', '#Ef8C86', '#FCB677', '#034C65')
+
+#creating the plot
+calendar_graph <- ggplot(cal_workout)+
+  geom_tile(mapping=aes(x=day,y=week_month_num, text = class_type),fill=NA)+
+  geom_text(mapping=aes(x=day, y=week_month_num, label=day_num), color="black", family="Gill Sans")+
+  geom_point(data = cal_workout%>%filter(did_workout==1), 
+             mapping=aes(x=day,y=week_month_num, color=type, text = class_type), size=8)+
+  geom_text(data = cal_workout%>%filter(did_workout==1), 
+            mapping=aes(x=day, y=week_month_num, label=day_num), color="white", family="Gill Sans")+ 
+  scale_y_reverse()+
+  scale_color_manual(values=pal,
+                     guide = guide_legend(title.position  ="top", title.hjust = 0.5, title="Workout Type"))+
+  #coord_fixed()+
+  labs(y="", x= "", 
+       title='ACTIVE DAYS 2023',
+       subtitle="Cardio includes running, cycling, and bootcamps. Strength includes strength classes and bootcamps.",
+       caption="Personal workout data from Strava API")+
+  facet_wrap(~month_name, scales = 'free')+
+  theme(
+    text=element_text(family="Gill Sans"),
+    legend.position="top",
+    axis.text.y=element_blank(),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    plot.title=element_text(hjust=0.5, family="Gill Sans Bold", size=18),
+    plot.subtitle=element_text(hjust=0.5, size=12),
+    legend.key = element_blank(),
+    legend.spacing.x = unit(0.5, 'cm'),
+    plot.margin= unit(c(0.8,0,0.4,0), "cm"),
+  )
+
+calendar_plotly <- ggplotly(calendar_graph, tooltip = "class_type")
+
+saveRDS(calendar_plotly, paste0(wd, 
+                                viz_folder, 
+                                "calendar_plotly"))
+```
+
+
+--------------------------------------------------------------------------------
+
+# Graph Distance Trends
+Line graphs for weekly, monthly, and year to date. 
+```{r}
+
+distance_weekly_line_graphs <- activities_data_c %>% 
+  filter(type == "Walk" | type == "Run") %>%
+  filter(year == current_year) %>%
+  filter(week >= current_week - 1) %>%
+  group_by(week, start_date, day, type) %>% 
+  summarize(distance = sum(distance, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(week = ifelse(week == current_week, "This Week", "Last Week")) %>% 
+  arrange(start_date) %>%
+  group_by(week, type) %>% 
+  mutate(`Cummulative Distance` = cumsum(distance)
+         ) %>% 
+  ungroup()
+
+
+ggplot(data = distance_weekly_line_graphs %>% 
+         filter(type == "Walk")
+       ) +
+  geom_line(aes(x = day, y = `Cummulative Distance`, color = week, linetype = week, 
+                group = week, alpha = week),
+            linewidth = 1.5) +  
+  geom_point(aes(x = day, y = `Cummulative Distance`, color = week, alpha = week), 
+             size = 5) + 
+  geom_hline(yintercept = 14, color = "#2F1F2B", linetype = "F1", linewidth = 1.5) +
+  # Layout
+  labs(y = "Distance (Miles)",
+       x = "",
+       alpha = "") + 
+  scale_color_manual(name = "", values = c("grey70", "#685268"), ) + 
+  scale_alpha_manual(name = "", values = c(0.25, 1.0)) + 
+  scale_linetype_manual(name = "", values = c("dashed", "solid")) + 
+  scale_x_discrete(expand = c(0.01,0.2)) + 
+  scale_y_continuous(breaks = c(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20)) +
+  theme_bw() + 
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(), 
+        panel.border = element_blank(), 
+        axis.text.x = element_text(face = "bold", size = 14),
+        axis.title.x = element_text(face = "bold", size = 16),
+        # LEGEND
+        legend.position = "right",
+        legend.direction = "vertical", 
+        legend.text = element_text(face = "bold", size = 12),
+        legend.title = element_text(face = "bold", size = 10),
+        # TITLE
+        plot.title = element_text(face = "bold", size = 22, hjust = 0.5)
+        )
+
+```
+
+# Map last outdoor activity
+```{r}
+
+```
+
+# Get Intensity Scores
+```{r}
+
+```
+
+
+

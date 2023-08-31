@@ -28,6 +28,8 @@ lapply(packages, library, character.only = T)
 app_name <- '###' # chosen by user
 app_client_id  <- '####' # an integer, assigned by Strava
 app_secret <- '#############################' # an alphanumeric secret, assigned by Strava
+
+
 wd <- getwd()
 output_folder <- "/activities_downloads_repo"
 
@@ -60,7 +62,9 @@ activities_data <- compile_activities(routes, units = "imperial")
 str(activities_data)
 summary(activities_data)
 
-saveRDS(activities_data, file = "strava_activities_082923.rds")
+saveRDS(activities_data, file = paste0(wd, 
+                                       output_folder, 
+                                       "/strava_activities_083023.rds"))
 
 
 ## MANIPULATE ACTIVITIES DATA---------------------------------------------------
